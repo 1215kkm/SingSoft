@@ -1,0 +1,49 @@
+{
+  "name": "juabang",
+  "productName": "주아방",
+  "version": "0.1.0",
+  "description": "주아방 (JUAbang) — 집에서 부르는 노래방",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "web": "node scripts/serve-web.js",
+    "dist": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.singsoft.juabang",
+    "productName": "주아방",
+    "files": [
+      "electron/**",
+      "app/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/yt-dlp.exe",
+        "to": "bin/yt-dlp.exe"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "app/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "주아방"
+    },
+    "artifactName": "JUAbang-Setup-${version}.${ext}",
+    "copyright": "JUAbang"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  }
+}
