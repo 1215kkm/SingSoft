@@ -21,13 +21,14 @@ export class Engine {
     const ctx = this.ctx = new AudioContext({ latencyHint: this.mode === 'fast' ? 0 : 'interactive' });
     this.master = ctx.createGain();
     this.master.connect(ctx.destination);
+    // 녹음은 스피커와 따로 받는다. 「안 내보내기」여도 목소리는 녹음된다.
     this.recordDest = ctx.createMediaStreamDestination();
-    this.master.connect(this.recordDest);
 
     // 노래 쪽
     this.songIn = ctx.createGain();
     this.songOut = ctx.createGain();
     this.songOut.connect(this.master);
+    this.songOut.connect(this.recordDest);
     this._buildVocalCut();
 
     // 마이크 공통 효과
@@ -37,9 +38,12 @@ export class Engine {
     comp.threshold.value = -20; comp.ratio.value = 4; comp.attack.value = 0.005; comp.release.value = 0.15;
     this.micBus.connect(hp); hp.connect(comp);
 
+    this.voice = ctx.createGain();                  // 원래 목소리 + 에코 + 잔향
     this.monitor = ctx.createGain();
+    this.voice.connect(this.monitor);
+    this.voice.connect(this.recordDest);
     this.monitor.connect(this.master);
-    comp.connect(this.monitor);                     // 원래 목소리
+    comp.connect(this.voice);
 
     this.delay = ctx.createDelay(1.5);
     this.feedback = ctx.createGain();
@@ -47,12 +51,12 @@ export class Engine {
     this.echoWet = ctx.createGain();
     comp.connect(this.delay);
     this.delay.connect(fbTone); fbTone.connect(this.feedback); this.feedback.connect(this.delay);
-    this.delay.connect(this.echoWet); this.echoWet.connect(this.monitor);
+    this.delay.connect(this.echoWet); this.echoWet.connect(this.voice);
 
     this.reverb = ctx.createConvolver();
     this.reverb.buffer = this._impulse(2.4);
     this.reverbWet = ctx.createGain();
-    comp.connect(this.reverb); this.reverb.connect(this.reverbWet); this.reverbWet.connect(this.monitor);
+    comp.connect(this.reverb); this.reverb.connect(this.reverbWet); this.reverbWet.connect(this.voice);
 
     this.applyAll();
     return ctx;

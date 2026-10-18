@@ -5,8 +5,16 @@ export function parseLrc(text) {
   for (const raw of (text || '').split(/\r?\n/)) {
     const stamps = [...raw.matchAll(/\[(\d+):(\d+(?:[.:]\d+)?)\]/g)];
     if (!stamps.length) continue;
-    const words = raw.replace(/\[[^\]]*\]/g, '').trim();
-    for (const s of stamps) lines.push({ t: +s[1] * 60 + parseFloat(s[2].replace(':', '.')), text: words });
+    const body = raw.replace(/\[[^\]]*\]/g, '');
+    // 글자 단위 시간(<분:초>)이 있으면 글자마다 채운다
+    const parts = body.split(/<(\d+):(\d+(?:\.\d+)?)>/);
+    let segs = null;
+    if (parts.length > 1) {
+      segs = [];
+      for (let k = 1; k < parts.length; k += 3) segs.push({ t: +parts[k] * 60 + +parts[k + 1], text: parts[k + 2] });
+    }
+    const words = (segs ? segs.map(x => x.text).join('') : body).trim();
+    for (const s of stamps) lines.push({ t: +s[1] * 60 + parseFloat(s[2].replace(':', '.')), text: words, segs });
   }
   return lines.sort((a, b) => a.t - b.t);
 }
@@ -74,7 +82,9 @@ export class LyricsView {
     this._show(other, cur + 1);
     const line = L[cur], next = L[cur + 1];
     let p = 0;
-    if (i >= 0) {
+    if (i >= 0 && line.segs) {
+      p = this._segProgress(slot, line, next, t);
+    } else if (i >= 0) {
       const dur = Math.min((next ? next.t : line.t + 5) - line.t, 10);
       p = Math.max(0, Math.min(1, (t - line.t) / (dur * 0.92)));
     }
@@ -89,5 +99,40 @@ export class LyricsView {
     this.shown[slot] = idx;
     const line = this.lines[idx];
     this.rows[slot].textContent = line ? (line.text || '♪') : '';
+    this.rows[slot]._edges = null;
+  }
+
+  // 글자 경계가 줄 폭의 몇 %인지 실제 글자 위치로 잰다 (창 크기가 바뀌면 다시 잰다)
+  _edges(slot, line) {
+    const row = this.rows[slot], w = row.getBoundingClientRect().width;
+    if (row._edges && row._edgesW === w) return row._edges;
+    const node = row.firstChild, edges = [];
+    if (!node || !w) return [];
+    const left = row.getBoundingClientRect().left, range = document.createRange();
+    let pos = 0;
+    const joined = line.segs.map(x => x.text).join('');
+    const lead = joined.length - joined.trimStart().length;   // 화면 글에서 잘린 앞 공백
+    for (const sg of line.segs) {
+      const a = Math.max(0, Math.min(node.length, pos - lead));
+      const b = Math.max(0, Math.min(node.length, pos - lead + sg.text.trimEnd().length));
+      range.setStart(node, a); range.setEnd(node, Math.max(a, b));
+      const r = range.getBoundingClientRect();
+      edges.push([(r.left - left) / w, (r.right - left) / w]);
+      pos += sg.text.length;
+    }
+    row._edges = edges; row._edgesW = w;
+    return edges;
+  }
+
+  _segProgress(slot, line, next, t) {
+    const segs = line.segs, edges = this._edges(slot, line);
+    if (!edges.length) return 0;
+    let k = -1;
+    for (let j = 0; j < segs.length; j++) { if (segs[j].t <= t) k = j; else break; }
+    if (k < 0) return 0;
+    const end = segs[k + 1]?.t ?? Math.min(next ? next.t : segs[k].t + 1.5, segs[k].t + 1.5);
+    const f = Math.max(0, Math.min(1, (t - segs[k].t) / Math.max(0.05, Math.min(end - segs[k].t, 1.2))));
+    const [a, b] = edges[k];
+    return a + (b - a) * f;
   }
 }

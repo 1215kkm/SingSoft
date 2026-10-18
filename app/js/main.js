@@ -76,19 +76,42 @@ setLibTab(store.get('libtab', 'mine'));
 
 // ---------- 내 노래 목록 ----------
 function songUrl(s) {
+  if (s.src) return s.src;
   if (s.fileName) return `/media/${encodeURIComponent(s.fileName)}`;
   if (s.blob) { s._url ||= URL.createObjectURL(s.blob); return s._url; }
   return null;
 }
 
 function kindBadge(s) {
+  if (s.isRec) return '내 녹음';
+  if (s.builtin) return '기본 곡';
   if (s.ytId && !s.fileName) return '유튜브 링크';
   if (s.ytId) return s.isVideo ? '노래방 영상' : '원곡';
   return s.isVideo ? '영상 파일' : '음악 파일';
 }
 
+// 기본 곡(app/songs)은 화면 파일과 같이 온다. 자막 시간·가사를 고치면 그 값만 따로 저장한다.
+let builtins = null;
+async function loadBuiltins() {
+  if (builtins) return builtins;
+  try {
+    const list = await fetch('songs/index.json').then(r => r.json());
+    builtins = list.map(b => ({ ...b, builtin: true, isVideo: false, addedAt: 0 }));
+  } catch { builtins = []; }
+  return builtins;
+}
+
 async function refreshSongs() {
-  songs = await library.all();
+  const [db, base] = await Promise.all([library.all(), loadBuiltins()]);
+  const saved = new Map(db.filter(s => s.builtin).map(s => [s.id, s]));
+  songs = [
+    ...db.filter(s => !s.builtin),
+    ...base.map(b => {
+      const o = saved.get(b.id);
+      return o ? { ...b, lyricsOffset: o.lyricsOffset || 0, lrc: 'lrc' in o ? o.lrc : b.lrc } : { ...b };
+    }),
+  ];
+  if (current) current = songs.find(s => s.id === current.id) || current;
   renderSongs();
   renderQueue();
 }
@@ -104,9 +127,10 @@ function renderSongs() {
         <div class="s"><span class="badge">${kindBadge(s)}</span>${s.lrc ? '<span class="badge ly">가사</span>' : ''}${s.artist ? `<span>${esc(s.artist)}</span>` : ''}${s.duration ? `<span>${fmt(s.duration)}</span>` : ''}</div>
       </div>
       <div class="acts">
-        <button class="btn primary" data-act="play">부르기</button>
-        <button class="btn" data-act="queue" data-tip="다음에 부를 곡으로 예약합니다">예약</button>
-        <button class="btn del" data-act="del" aria-label="지우기" data-tip="목록에서 지웁니다 (받은 파일은 휴지통으로)">🗑</button>
+        ${s.isRec
+          ? `<button class="btn primary" data-act="play">듣기</button><button class="btn" data-act="save" data-tip="녹음을 파일로 내려받습니다">저장</button>`
+          : `<button class="btn primary" data-act="play">부르기</button><button class="btn" data-act="queue" data-tip="다음에 부를 곡으로 예약합니다">예약</button>`}
+        ${s.builtin ? '' : '<button class="btn del" data-act="del" aria-label="지우기" data-tip="목록에서 지웁니다 (받은 파일은 휴지통으로)">🗑</button>'}
       </div>
     </li>`).join('');
   if (!list.length && songs.length) $('#songList').innerHTML = `<li class="empty">「${esc(q)}」에 맞는 노래가 없습니다</li>`;
@@ -121,6 +145,7 @@ $('#songList').onclick = e => {
   if (btn.dataset.act === 'play') playSong(song);
   else if (btn.dataset.act === 'queue') addToQueue(song);
   else if (btn.dataset.act === 'del') deleteSong(song);
+  else if (btn.dataset.act === 'save') downloadRec(song);
 };
 
 function deleteSong(song) {
@@ -698,20 +723,32 @@ $('#recBtn').onclick = async () => {
     recStart = Date.now();
     b.classList.add('on');
     b.dataset.tip = '다시 누르면 녹음을 멈추고 파일로 저장합니다';
-    if (current?.ytId && !current.fileName) toast('유튜브 링크 곡은 반주가 녹음되지 않고 목소리만 녹음됩니다.');
+    if (!micOn) toast('마이크가 꺼져 있어 목소리가 녹음되지 않습니다. 「🎤 마이크 켜기」를 누르세요.', '마이크 켜기', turnMicOn, 8000);
+    else if (current?.ytId && !current.fileName) toast('유튜브 링크 곡은 반주가 녹음되지 않고 목소리만 녹음됩니다.');
   } else {
     recStart = 0;
     b.classList.remove('on');
     b.textContent = '● 녹음';
+    b.dataset.tip = '노래와 목소리를 함께 녹음합니다. 다시 누르면 멈추고 「내 노래」에 넣습니다.';
     const blob = await engine.stopRecording();
     if (!blob?.size) return toast('녹음된 소리가 없습니다');
     const d = new Date(), p = n => String(n).padStart(2, '0');
-    const name = `주아방 녹음 ${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${current ? ' ' + cleanTitle(current.title).slice(0, 30) : ''}.${blob.type.includes('mp4') ? 'm4a' : 'webm'}`;
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
-    a.click();
-    toast(`녹음을 저장했습니다: ${name}`);
+    const rec = {
+      id: newId(), isRec: true, isVideo: false, blob, mime: blob.type, addedAt: Date.now(),
+      title: `녹음 ${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}${current ? ' · ' + current.title : ''}`,
+    };
+    await library.put(rec);
+    await refreshSongs();
+    setLibTab('mine');
+    toast('녹음을 「내 노래」에 넣었습니다', '듣기', () => playSong(songs.find(s => s.id === rec.id)), 8000);
   }
 };
+
+function downloadRec(song) {
+  const ext = song.mime?.includes('mp4') ? 'm4a' : 'webm';
+  const name = `주아방 ${song.title.replace(/[\\/:*?"<>|]/g, '-')}.${ext}`;
+  Object.assign(document.createElement('a'), { href: songUrl(song), download: name }).click();
+}
 
 // ---------- 화면 켜 두기 (폰) ----------
 let wakeLock = null;

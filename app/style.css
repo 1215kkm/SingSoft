@@ -151,11 +151,12 @@ body.is-desktop .web-only { display: none; }
 .lrow {
   --p: 0%;
   min-height: 1.3em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  width: fit-content; max-width: 100%;
   background: linear-gradient(90deg, var(--lyric-fill) var(--p), #ffffff var(--p));
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 0 2px #000) drop-shadow(0 2px 3px #000) drop-shadow(0 0 6px rgba(0,0,0,.8));
 }
-.lrow[data-row="1"] { text-align: right; }
+.lrow[data-row="1"] { margin-left: auto; }
 
 .transport { display: flex; align-items: center; gap: 10px; flex: none; }
 .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 40px; text-align: center; }
