@@ -121,13 +121,24 @@ export class Engine {
     await this.ensure();
     this.stopMic(slot);
     if (deviceId == null) return null;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: deviceId ? { exact: deviceId } : undefined,
-        echoCancellation: false, noiseSuppression: false, autoGainControl: false,
-        channelCount: 1, latency: 0,
-      },
-    });
+    // 사파리는 값이 비어 있는 설정이나 모르는 설정이 있으면 거부한다.
+    // 노래방용 설정 → 기본 설정 → 아무 마이크 순으로 줄여 가며 시도한다.
+    const dev = deviceId ? { deviceId: { exact: deviceId } } : {};
+    const tries = [
+      { ...dev, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1, latency: 0 },
+      { ...dev, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      deviceId ? { deviceId } : true,
+      true,
+    ];
+    let stream, lastErr;
+    for (const audio of tries) {
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio }); break; }
+      catch (err) {
+        lastErr = err;
+        if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') throw err;
+      }
+    }
+    if (!stream) throw lastErr;
     const src = this.ctx.createMediaStreamSource(stream);
     const gain = this.ctx.createGain();
     const analyser = this.ctx.createAnalyser(); analyser.fftSize = 512;
